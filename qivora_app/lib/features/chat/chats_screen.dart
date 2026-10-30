@@ -1,0 +1,571 @@
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
+import 'package:uuid/uuid.dart';
+import 'package:sqflite/sqflite.dart';
+import '../../core/database/database_service.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/widgets/qivora_avatar.dart';
+import '../../core/widgets/qivora_empty_state.dart';
+
+/// The Chats list screen — conversation list with search, unread counts,
+/// and pinned/muted/archived state backed by SQLite.
+///
+/// Every row reflects data persisted in the database. No online status,
+/// unread count, or message preview is fabricated.
+class ChatsScreen extends StatefulWidget {
+  const ChatsScreen({super.key});
+
+  @override
+  State<ChatsScreen> createState() => _ChatsScreenState();
+}
+
+class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
+  List<Map<String, dynamic>> _conversations = [];
+  String _query = '';
+  bool _loading = true;
+  String? _error;
+  bool _showArchived = false;
+  bool _showSearchField = true;
+  String _userId = 'me';
+  final _searchFocus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadUserId();
+    _load();
+  }
+
+  Future<void> _loadUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _userId = prefs.getString('user_id') ?? 'me';
+    });
+  }
+
+  Future<void> _load() async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final db = await DatabaseService.instance.database;
+      final archived = _showArchived ? 1 : 0;
+      final rows = await db.rawQuery('''
+        SELECT c.id, c.title, c.type, c.avatar_path, c.archived, c.updated_at,
+               m.content AS last_message, m.created_at AS last_msg_time,
+               m.delivery_status AS last_msg_status,
+               p.is_pinned, p.is_muted, p.unread_count
+        FROM conversations c
+        LEFT JOIN messages m ON m.id = c.last_message_id
+        LEFT JOIN conversation_participants p
+          ON p.conversation_id = c.id AND p.user_id = ?
+        WHERE c.archived = ?
+        ORDER BY p.is_pinned DESC, c.updated_at DESC
+      ''', [_userId, archived]);
+      if (!mounted) return;
+      setState(() {
+        _conversations = rows;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _retry() => _load();
+
+  String _formatTime(DateTime? dt) {
+    if (dt == null) return '';
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays == 0) {
+      return DateFormat('hh:mm a').format(dt);
+    }
+    if (diff.inDays == 1) return 'Yesterday';
+    return DateFormat('MM/dd').format(dt);
+  }
+
+  List<Map<String, dynamic>> _filtered(List<Map<String, dynamic>> rows) {
+    final q = _query.toLowerCase();
+    return rows.where((c) {
+      final title = (c['title'] as String? ?? '').toLowerCase();
+      final last = (c['last_message'] as String? ?? '').toLowerCase();
+      return title.contains(q) || last.contains(q);
+    }).toList();
+  }
+
+  /// Ensures a participant row exists for the current user before pin/mute/
+  /// archive/unread state is toggled.
+  Future<void> _ensureParticipant(String conversationId) async {
+    final db = await DatabaseService.instance.database;
+    final existing = await db.query(
+      'conversation_participants',
+      where: 'conversation_id = ? AND user_id = ?',
+      whereArgs: [conversationId, _userId],
+    );
+    if (existing.isNotEmpty) return;
+    await db.insert(
+      'conversation_participants',
+      {
+        'id': const Uuid().v4(),
+        'conversation_id': conversationId,
+        'user_id': _userId,
+        'role': 'member',
+        'joined_at': DateTime.now().toIso8601String(),
+        'is_muted': 0,
+        'is_pinned': 0,
+        'unread_count': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  Future<void> _togglePinned(String conversationId, bool isPinned) async {
+    await _ensureParticipant(conversationId);
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'conversation_participants',
+      {'is_pinned': isPinned ? 0 : 1},
+      where: 'conversation_id = ? AND user_id = ?',
+      whereArgs: [conversationId, _userId],
+    );
+    await _load();
+  }
+
+  Future<void> _toggleMuted(String conversationId, bool isMuted) async {
+    await _ensureParticipant(conversationId);
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'conversation_participants',
+      {'is_muted': isMuted ? 0 : 1},
+      where: 'conversation_id = ? AND user_id = ?',
+      whereArgs: [conversationId, _userId],
+    );
+    await _load();
+  }
+
+  Future<void> _toggleArchived(String conversationId, bool isArchived) async {
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'conversations',
+      {
+        'archived': isArchived ? 0 : 1,
+        'updated_at': DateTime.now().toIso8601String()
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+    await _load();
+  }
+
+  Future<void> _deleteConversation(String conversationId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete conversation'),
+        content: const Text(
+          'This will delete the conversation and all its messages. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final db = await DatabaseService.instance.database;
+      // Foreign keys are ON: messages and participant rows cascade.
+      await db.delete(
+        'conversations',
+        where: 'id = ?',
+        whereArgs: [conversationId],
+      );
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conversation deleted')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('Delete failed: $e'),
+            backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  void _openMessageActions(Map<String, dynamic> c) {
+    final isPinned = (c['is_pinned'] as int?) == 1;
+    final isMuted = (c['is_muted'] as int?) == 1;
+    final isArchived = (c['archived'] as int?) == 1;
+    final cid = c['id'] as String;
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
+            title: Text(isPinned ? 'Unpin' : 'Pin'),
+            onTap: () {
+              Navigator.pop(context);
+              _togglePinned(cid, isPinned);
+            },
+          ),
+          ListTile(
+            leading: Icon(isMuted ? Icons.volume_up : Icons.volume_off),
+            title: Text(isMuted ? 'Unmute' : 'Mute'),
+            onTap: () {
+              Navigator.pop(context);
+              _toggleMuted(cid, isMuted);
+            },
+          ),
+          ListTile(
+            leading: Icon(isArchived ? Icons.unarchive : Icons.archive),
+            title: Text(isArchived ? 'Unarchive' : 'Archive'),
+            onTap: () {
+              Navigator.pop(context);
+              _toggleArchived(cid, isArchived);
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: AppColors.error),
+            title: const Text(
+              'Delete conversation',
+              style: TextStyle(color: AppColors.error),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              _deleteConversation(cid);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Conversation previews (last message / unread count) may have changed
+      // while another screen was active.
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final filtered = _filtered(_conversations);
+
+    Widget body;
+    if (_loading) {
+      body = const QivoraLoading(message: 'Loading conversations…');
+    } else if (_error != null) {
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
+            const SizedBox(height: 16),
+            Text(
+              'Failed to load conversations',
+              style: TextStyle(
+                color: isDark ? Colors.white : AppColors.textMain,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color:
+                    isDark ? const Color(0xFF94A3B8) : AppColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _retry,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    } else if (filtered.isEmpty) {
+      body = QivoraEmptyState(
+        icon: _showArchived
+            ? Icons.archive_outlined
+            : (_query.isNotEmpty
+                ? Icons.search_off
+                : Icons.chat_bubble_outline),
+        title: _showArchived
+            ? 'No archived conversations'
+            : (_query.isNotEmpty
+                ? 'No conversations found'
+                : 'No conversations yet'),
+        subtitle: _showArchived
+            ? 'Archived conversations will appear here.'
+            : (_query.isNotEmpty
+                ? 'Try adjusting your search'
+                : 'Start a new conversation from Contacts.'),
+        action: !_showArchived && _query.isEmpty
+            ? FilledButton(
+                onPressed: () => context.push('/contacts'),
+                child: const Text('New Conversation'),
+              )
+            : null,
+      );
+    } else {
+      body = Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Visibility(
+              visible: _showSearchField,
+              child: TextField(
+                focusNode: _searchFocus,
+                onChanged: (v) => setState(() => _query = v),
+                onSubmitted: (_) => _searchFocus.unfocus(),
+                decoration: InputDecoration(
+                  hintText: 'Search conversations',
+                  hintStyle: TextStyle(
+                    color: isDark
+                        ? const Color(0xFF94A3B8)
+                        : AppColors.textSecondary,
+                  ),
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _query.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchFocus.unfocus();
+                            setState(() => _query = '');
+                          },
+                          tooltip: 'Clear search',
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: isDark ? AppColors.darkSurface : Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: ListView.builder(
+              itemCount: filtered.length,
+              itemBuilder: (_, i) {
+                final c = filtered[i];
+                final title = c['title'] as String? ?? 'Unknown';
+                final lastMessage = c['last_message'] as String? ?? '';
+                final lastMsgTime = c['last_msg_time'] != null
+                    ? DateTime.tryParse(c['last_msg_time'] as String)
+                    : null;
+                final isPinned = (c['is_pinned'] as int?) == 1;
+                final isMuted = (c['is_muted'] as int?) == 1;
+                final unreadCount = (c['unread_count'] as int?) ?? 0;
+                final hasUnread = unreadCount > 0;
+
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  leading: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      QivoraAvatar(
+                        displayName: title,
+                        radius: 26,
+                        online: false,
+                        showOnlineIndicator: false,
+                      ),
+                    ],
+                  ),
+                  title: Row(
+                    children: [
+                      if (isPinned)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: Icon(
+                            Icons.push_pin,
+                            size: 16,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : AppColors.textMain,
+                            fontWeight:
+                                hasUnread ? FontWeight.w700 : FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (hasUnread)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$unreadCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  subtitle: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          lastMessage,
+                          style: TextStyle(
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : AppColors.textSecondary,
+                            fontSize: 14,
+                            fontWeight:
+                                hasUnread ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatTime(lastMsgTime),
+                        style: TextStyle(
+                          color: isDark
+                              ? const Color(0xFF94A3B8)
+                              : AppColors.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  trailing: isMuted
+                      ? const Icon(
+                          Icons.volume_off,
+                          size: 20,
+                          color: AppColors.secondary,
+                        )
+                      : null,
+                  onTap: () async {
+                    // Mark conversation as read when opened.
+                    await _ensureParticipant(c['id'] as String);
+                    final db = await DatabaseService.instance.database;
+                    await db.update(
+                      'conversation_participants',
+                      {'unread_count': 0},
+                      where: 'conversation_id = ? AND user_id = ?',
+                      whereArgs: [c['id'] as String, _userId],
+                    );
+                    if (context.mounted) {
+                      context.go(
+                          '/chat/${c['id']}?title=${Uri.encodeComponent(title)}');
+                    }
+                  },
+                  onLongPress: () => _openMessageActions(c),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_showArchived ? 'Archived Chats' : 'Qivora'),
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              setState(() => _showSearchField = !_showSearchField);
+              if (_showSearchField) {
+                FocusScope.of(context).requestFocus(_searchFocus);
+              }
+            },
+            tooltip: 'Search',
+          ),
+          PopupMenuButton<int>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More',
+            onSelected: (item) {
+              if (item == 0) {
+                setState(() => _showArchived = !_showArchived);
+                _query = '';
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 0,
+                child: Text(_showArchived
+                    ? 'Show all conversations'
+                    : 'Show archived conversations'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: body,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => context.push('/contacts'),
+        child: const Icon(Icons.chat_rounded),
+      ),
+    );
+  }
+}
