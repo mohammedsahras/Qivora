@@ -55,36 +55,78 @@ Enforcement at the data-access/service layer, not just UI:
 - The message bubble's outer `Column` had default `mainAxisSize: max` and contained a redundant `Flexible`; under the ListView's sliver constraints this threw "RenderFlex children have non-zero flex but incoming height constraints are unbounded" (`RenderFlex ... Column ← QivoraMessageBubble`, constraints `0.0<=h<=Infinity`), crashing every test that rendered a message.
 - Fix: outer `Column(mainAxisSize: MainAxisSize.min)` and removed the redundant `Flexible` (inner column already `mainAxisSize: min`). Verified via minimal repro + scratch tests.
 
-## Tests
-- chats_test.dart: 6/6 GREEN (rewritten: databaseFactoryFfiNoIsolate, runAsync seeding).
-- contacts_test.dart: 3/3 GREEN (rewritten: databaseFactoryFfiNoIsolate, runAsync, per-test GoRouter).
-- conversation_test.dart: 5/5 GREEN (rewritten; scroll guards, composer always present, String timestamps).
-- status_access_test / status_privacy_test / status_views_test: all GREEN (contacts-cache fix).
-- communities_test: 5/5 (updated schema-version expectation 16→17).
-- community_roles_test, groups_test, database_test: pass.
-- **Full `flutter test`: 65 passed, 0 failed.**
+## Back button redesign (lib/core/widgets/qivora_back_button.dart [NEW])
 
-## Verification results
-- `flutter test`: **65 passed, 0 failed** (all test files).
+Created reusable `QivoraBackButton` widget:
+- **Design**: rounded-square (borderRadius 14), light mint/emerald background (`AppColors.primaryLight` = `0xFFE3F6EF`), dark teal arrow icon (`AppColors.primary` = `0xFF00A878`, `Icons.arrow_back_rounded`).
+- **Touch target**: 48x48 (accessibility minimum).
+- **Animation**: Material ripple (`InkWell` splash + highlight) on tap.
+- **Elevation**: soft drop shadow (`BoxShadow`).
+- **Navigation**: `GoRouter.canPop()` ? `context.pop()` : `context.go(fallbackRoute ?? '/home')`. Safe fallback when no previous route exists.
+- Constructor is `const`; all call sites use `const QivoraBackButton(...)`.
+
+Applied to every secondary screen AppBar:
+- `conversation_screen.dart` — `leading: const QivoraBackButton(fallbackRoute: '/home')` (replaced QivoraAvatar leading)
+- `archived_chats_screen.dart` — fallback `/home`
+- `starred_messages_screen.dart` — fallback `/home`
+- `message_search_screen.dart` — fallback `/home`
+- `community_detail_screen.dart` — fallback `/communities`
+- `group_detail_screen.dart` — fallback `/groups`
+- `channel_detail_screen.dart` — fallback `/channels` (also fixed `actions:` list structure)
+- `contacts_screen.dart` — fallback `/home`
+- `status_screen.dart` — fallback `/home`
+- `privacy_screen.dart` — fallback `/settings`
+
+Main navigation tabs (Chats, Status, Channels, Calls, Settings, Communities) intentionally do NOT get back buttons per requirement. Auth entry screens (Login, Register, Forgot, Welcome, Splash) also have no back button.
+
+## Back button tests (test/qivora_back_button_test.dart [NEW])
+
+4 widget tests:
+- `renders a visible rounded-square back button` — icon, 48x48 container, mint background present.
+- `pops to previous route when one exists` — `canPop()` true before tap, false after.
+- `falls back to /home when no previous route exists` — `go('/home')` called when `canPop()` is false, no crash.
+- `works in nested navigation` — pop returns to immediate parent in a multi-level stack.
+
+## Tests (updated)
+
+- chats_test.dart: 6/6 GREEN
+- contacts_test.dart: 3/3 GREEN
+- conversation_test.dart: 5/5 GREEN
+- status_access_test / status_privacy_test / status_views_test: all GREEN
+- communities_test: 5/5
+- community_roles_test, groups_test, database_test: pass
+- qivora_back_button_test.dart: 4/4 GREEN
+- **Full `flutter test`: 69 passed, 0 failed.**
+
+## Verification results (updated)
+
+- `flutter test`: **69 passed, 0 failed** (all test files).
 - `flutter analyze`: **No issues found.**
 - `flutter build apk --debug`: **Built `build/app/outputs/flutter-apk/app-debug.apk` successfully** (only Gradle/Kotlin-plugin warnings, no errors).
 
-## git diff
-`git diff --stat` (12 modified tracked files, 423 insertions, 162 deletions):
-- QIVORA_PROGRESS_TRACKER.md, lib/core/database/database_service.dart, lib/core/widgets/qivora_message_bubble.dart,
-  lib/features/chat/chats_screen.dart, lib/features/chat/conversation_screen.dart,
-  lib/features/settings/settings_screen.dart, lib/features/status/status_screen.dart, lib/main.dart,
-  test/chats_test.dart, test/contacts_test.dart, test/conversation_test.dart, test/database_test.dart
+## git diff (updated)
 
-`git diff --name-only`: same 12 files above.
+`git diff --stat` (10 modified tracked files, 40 insertions, 15 deletions):
+- lib/features/channels/channel_detail_screen.dart
+- lib/features/chat/archived_chats_screen.dart
+- lib/features/chat/conversation_screen.dart
+- lib/features/chat/message_search_screen.dart
+- lib/features/chat/starred_messages_screen.dart
+- lib/features/communities/community_detail_screen.dart
+- lib/features/contacts/contacts_screen.dart
+- lib/features/groups/group_detail_screen.dart
+- lib/features/settings/privacy_screen.dart
+- lib/features/status/status_screen.dart
+
+`git diff --name-only`: same 10 files above.
 
 New (untracked) files delivered this phase:
-- lib/core/auth/status_service.dart, lib/features/chat/archived_chats_screen.dart,
-  lib/features/chat/starred_messages_screen.dart, lib/features/communities/, lib/features/groups/,
-  test/communities_test.dart, test/community_roles_test.dart, test/groups_test.dart,
-  test/status_access_test.dart
+- lib/core/widgets/qivora_back_button.dart
+- test/qivora_back_button_test.dart
 
 ## Remaining limitations
+
 - No cross-device sync (no backend); community profile image stored locally via image_picker.
 - Test-hang root cause documented and fixed for this codebase's tests; if the environment's sqflite/ffi binding changes, re-verify with `databaseFactoryFfiNoIsolate` + `tester.runAsync`.
 - Existing SQLite data preserved; all migrations additive (ALTER TABLE ADD COLUMN / CREATE IF NOT EXISTS).
+- Main tab screens (Chats, Status, Channels, Calls, Settings, Communities) intentionally have no back button; system back navigation is handled by GoRouter/framework automatically.

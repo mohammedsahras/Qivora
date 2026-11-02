@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:io';
 import '../../core/database/database_service.dart';
+import '../../core/widgets/qivora_back_button.dart';
 import 'group_service.dart';
 
 /// Group details with member management using existing participants table.
@@ -176,6 +177,7 @@ class _GroupDetailScreenState extends State<GroupDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/groups'),
         title: Text((_group?['title'] as String?) ?? 'Group'),
         actions: [
           if (_isAdmin) IconButton(icon: const Icon(Icons.person_add), onPressed: _addMember),

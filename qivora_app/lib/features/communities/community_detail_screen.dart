@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/database/database_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/widgets/qivora_back_button.dart';
 import 'community_service.dart';
 
 /// Community details: info, linked groups, members, management actions.
@@ -238,6 +239,7 @@ class _CommunityDetailScreenState extends State<CommunityDetailScreen> {
     }
     return Scaffold(
       appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/communities'),
         title: Text(_community!['name'] as String),
         actions: [
           if (_isOwner)

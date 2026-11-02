@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/constants.dart';
+import '../../core/widgets/qivora_back_button.dart';
 
 /// Privacy controls persisted locally via SharedPreferences.
 ///
@@ -77,6 +78,7 @@ class _PrivacyScreenState extends ConsumerState<PrivacyScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/settings'),
         title: const Text('Privacy'),
         centerTitle: false,
         elevation: 0,

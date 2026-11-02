@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/database/database_service.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/widgets/qivora_back_button.dart';
 
 class MessageSearchScreen extends StatefulWidget {
   const MessageSearchScreen({super.key});
@@ -93,7 +94,10 @@ class _MessageSearchScreenState extends State<MessageSearchScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: const Text('Search Messages')),
+      appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/home'),
+        title: const Text('Search Messages'),
+      ),
       body: Column(
         children: [
           Padding(

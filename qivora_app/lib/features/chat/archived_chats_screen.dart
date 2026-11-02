@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/database/database_service.dart';
+import '../../core/widgets/qivora_back_button.dart';
 
 /// Dedicated screen listing archived conversations with unarchive support.
 class ArchivedChatsScreen extends StatefulWidget {
@@ -39,7 +40,10 @@ class _ArchivedChatsScreenState extends State<ArchivedChatsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Archived Chats')),
+      appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/home'),
+        title: const Text('Archived Chats'),
+      ),
       body: _rows.isEmpty
           ? const Center(child: Text('No archived chats'))
           : ListView.builder(

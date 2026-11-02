@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/database/database_service.dart';
+import '../../core/widgets/qivora_back_button.dart';
 
 class ChannelDetailScreen extends StatefulWidget {
   final String channelId;
@@ -138,11 +139,15 @@ class _ChannelDetailScreenState extends State<ChannelDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text((_channel?['name'] as String?) ?? 'Channel'), actions: [
-        IconButton(icon: const Icon(Icons.edit), onPressed: _editChannel),
-        IconButton(icon: const Icon(Icons.admin_panel_settings), onPressed: _manageAdmins),
-        IconButton(icon: const Icon(Icons.add), onPressed: _publishUpdate),
-      ]),
+      appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/channels'),
+        title: Text((_channel?['name'] as String?) ?? 'Channel'),
+        actions: [
+          IconButton(icon: const Icon(Icons.edit), onPressed: _editChannel),
+          IconButton(icon: const Icon(Icons.admin_panel_settings), onPressed: _manageAdmins),
+          IconButton(icon: const Icon(Icons.add), onPressed: _publishUpdate),
+        ],
+      ),
       body: _channel == null ? const Center(child: Text('Channel not found')) : Column(
         children: [
           SwitchListTile(

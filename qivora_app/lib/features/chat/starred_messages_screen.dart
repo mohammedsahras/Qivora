@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/database/database_service.dart';
+import '../../core/widgets/qivora_back_button.dart';
 
 /// Dedicated screen listing starred messages grouped by conversation.
 class StarredMessagesScreen extends StatefulWidget {
@@ -39,7 +40,10 @@ class _StarredMessagesScreenState extends State<StarredMessagesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Starred Messages')),
+      appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/home'),
+        title: const Text('Starred Messages'),
+      ),
       body: _rows.isEmpty
           ? const Center(child: Text('No starred messages'))
           : ListView.builder(

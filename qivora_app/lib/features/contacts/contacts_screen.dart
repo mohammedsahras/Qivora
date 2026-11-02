@@ -6,6 +6,7 @@ import '../../core/database/database_service.dart';
 import 'package:sqflite/sqflite.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/qivora_avatar.dart';
+import '../../core/widgets/qivora_back_button.dart';
 import '../../core/widgets/qivora_empty_state.dart';
 
 /// Contacts screen — browse local users, add contacts, and start a
@@ -249,6 +250,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/home'),
         title: const Text('Contacts'),
         centerTitle: false,
         elevation: 0,

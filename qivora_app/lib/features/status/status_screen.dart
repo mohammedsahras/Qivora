@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import '../../core/auth/status_service.dart';
 import '../../core/database/database_service.dart';
+import '../../core/widgets/qivora_back_button.dart';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({super.key});
@@ -181,7 +182,10 @@ class _StatusScreenState extends State<StatusScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Status')),
+      appBar: AppBar(
+        leading: const QivoraBackButton(fallbackRoute: '/home'),
+        title: const Text('Status'),
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _createStatus,
         child: const Icon(Icons.edit),

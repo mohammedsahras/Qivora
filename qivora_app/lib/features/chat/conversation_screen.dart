@@ -16,6 +16,7 @@ import 'package:path/path.dart' as p;
 import '../../core/database/database_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/widgets/qivora_avatar.dart';
+import '../../core/widgets/qivora_back_button.dart';
 import '../../core/widgets/qivora_message_bubble.dart';
 
 /// Individual conversation screen.
@@ -1149,12 +1150,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
-        leading: QivoraAvatar(
-          displayName: widget.conversationTitle,
-          radius: 20,
-          online: false,
-          showOnlineIndicator: false,
-        ),
+        leading: const QivoraBackButton(fallbackRoute: '/home'),
         actions: [
           IconButton(
             icon: const Icon(Icons.videocam_outlined),
