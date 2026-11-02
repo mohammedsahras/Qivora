@@ -127,12 +127,11 @@ class QivoraMessageBubble extends StatelessWidget {
           ),
         ),
       ],
-      Flexible(
-        child: Column(
-          crossAxisAlignment:
-              isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      Column(
+        crossAxisAlignment:
+            isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
             Container(
               constraints: BoxConstraints(
                 maxWidth: MediaQuery.of(context).size.width * 0.75,
@@ -168,7 +167,6 @@ class QivoraMessageBubble extends StatelessWidget {
               ),
           ],
         ),
-      ),
     ];
 
     if (isSent) {

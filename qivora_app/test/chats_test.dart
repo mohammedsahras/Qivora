@@ -11,7 +11,7 @@ import 'package:qivora_app/features/chat/chats_screen.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
-  databaseFactory = databaseFactoryFfi;
+  databaseFactory = databaseFactoryFfiNoIsolate;
   late String dbPath;
 
   setUp(() async {
@@ -86,7 +86,9 @@ void main() {
       (WidgetTester tester) async {
     debugPrint('[HANG-DEBUG] 001 test started');
     debugPrint('[HANG-DEBUG] 002 before seed');
-    await seed();
+    await tester.runAsync(() async {
+      await seed();
+    });
     debugPrint('[HANG-DEBUG] 003 after seed');
     debugPrint('[HANG-DEBUG] 004 before pumpWidget');
     await tester.pumpWidget(const MaterialApp(home: ChatsScreen()));
@@ -105,7 +107,9 @@ void main() {
 
   testWidgets('search filters conversations and clears back',
       (WidgetTester tester) async {
-    await seed();
+    await tester.runAsync(() async {
+      await seed();
+    });
     await tester.pumpWidget(const MaterialApp(home: ChatsScreen()));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -128,11 +132,13 @@ void main() {
 
   testWidgets('shows unread count badge and bolds unread conversations',
       (WidgetTester tester) async {
-    await seed();
-    final db = await DatabaseService.instance.database;
-    await db.update('conversation_participants', {'unread_count': 2},
-        where: 'conversation_id = ? AND user_id = ?',
-        whereArgs: ['convA', 'me']);
+    await tester.runAsync(() async {
+      await seed();
+      final db = await DatabaseService.instance.database;
+      await db.update('conversation_participants', {'unread_count': 2},
+          where: 'conversation_id = ? AND user_id = ?',
+          whereArgs: ['convA', 'me']);
+    });
 
     await tester.pumpWidget(const MaterialApp(home: ChatsScreen()));
     await tester.pump();
@@ -143,7 +149,9 @@ void main() {
 
   testWidgets('pins and unpins a conversation via long-press menu',
       (WidgetTester tester) async {
-    await seed();
+    await tester.runAsync(() async {
+      await seed();
+    });
     await tester.pumpWidget(const MaterialApp(home: ChatsScreen()));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -181,7 +189,9 @@ void main() {
 
   testWidgets('archives and restores a conversation',
       (WidgetTester tester) async {
-    await seed();
+    await tester.runAsync(() async {
+      await seed();
+    });
     await tester.pumpWidget(const MaterialApp(home: ChatsScreen()));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -238,9 +248,11 @@ void main() {
 
   testWidgets('shows empty state when there are no conversations',
       (WidgetTester tester) async {
-    await seed();
-    final db = await DatabaseService.instance.database;
-    await db.delete('conversations');
+    await tester.runAsync(() async {
+      await seed();
+      final db = await DatabaseService.instance.database;
+      await db.delete('conversations');
+    });
 
     await tester.pumpWidget(const MaterialApp(home: ChatsScreen()));
     await tester.pump();

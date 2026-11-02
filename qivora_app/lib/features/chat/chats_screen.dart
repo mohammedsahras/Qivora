@@ -548,6 +548,9 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
               if (item == 0) {
                 setState(() => _showArchived = !_showArchived);
                 _query = '';
+                // Reload from the database so the toggled archive state is
+                // reflected immediately.
+                _load();
               }
             },
             itemBuilder: (context) => [

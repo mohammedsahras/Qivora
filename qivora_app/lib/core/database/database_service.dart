@@ -31,7 +31,7 @@ class DatabaseService {
         _testDatabasePath ?? join(await getDatabasesPath(), 'qivora.db');
     return openDatabase(
       path,
-      version: 13,
+      version: 17,
       onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, version) async {
         await _createSchema(db);
@@ -151,7 +151,7 @@ class DatabaseService {
          if (oldV < 11) {
            await db.execute("CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, category TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);");
            await db.execute("CREATE TABLE IF NOT EXISTS channel_updates (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, content TEXT, image_path TEXT, created_at TEXT NOT NULL, FOREIGN KEY(channel_id) REFERENCES channels(id) ON DELETE CASCADE);");
-           await db.execute("CREATE TABLE IF NOT EXISTS statuses (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, content TEXT, image_path TEXT, background_color TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
+           await db.execute("CREATE TABLE IF NOT EXISTS statuses (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, content TEXT, image_path TEXT, background_color TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, privacy TEXT DEFAULT 'all', except_list TEXT, only_list TEXT, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
            await db.execute("CREATE TABLE IF NOT EXISTS blocked_contacts (id TEXT PRIMARY KEY, blocker_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(blocker_id, blocked_id));");
            await db.execute("CREATE TABLE IF NOT EXISTS privacy_settings (key TEXT PRIMARY KEY, value TEXT);");
          }
@@ -161,6 +161,64 @@ class DatabaseService {
          }
          if (oldV < 13) {
            await db.execute("CREATE TABLE IF NOT EXISTS status_views (status_id TEXT NOT NULL, viewer_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(status_id, viewer_id), FOREIGN KEY(status_id) REFERENCES statuses(id) ON DELETE CASCADE, FOREIGN KEY(viewer_id) REFERENCES users(id) ON DELETE CASCADE);");
+         }
+         if (oldV < 14) {
+           // Deduplicate duplicate participant rows before enforcing uniqueness.
+           await db.execute('''
+             DELETE FROM conversation_participants WHERE id NOT IN (
+               SELECT MIN(id) FROM conversation_participants GROUP BY conversation_id, user_id
+             );
+           ''');
+           try {
+             await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_unique ON conversation_participants(conversation_id, user_id);');
+           } catch (_) {}
+         }
+         if (oldV < 17) {
+           // Per-status privacy storage for enforcing My Contacts / Except / Only.
+           try {
+             await db.execute("ALTER TABLE statuses ADD COLUMN privacy TEXT DEFAULT 'all'");
+           } catch (_) {}
+           try {
+             await db.execute('ALTER TABLE statuses ADD COLUMN except_list TEXT');
+           } catch (_) {}
+           try {
+             await db.execute('ALTER TABLE statuses ADD COLUMN only_list TEXT');
+           } catch (_) {}
+         }
+         if (oldV < 16) {
+           await db.execute("CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, avatar_path TEXT, owner_user_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);");
+           await db.execute("CREATE TABLE IF NOT EXISTS community_members (community_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT DEFAULT 'member', joined_at TEXT NOT NULL, PRIMARY KEY(community_id, user_id), FOREIGN KEY(community_id) REFERENCES communities(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
+           await db.execute("CREATE TABLE IF NOT EXISTS community_groups (community_id TEXT NOT NULL, conversation_id TEXT NOT NULL, added_at TEXT NOT NULL, PRIMARY KEY(community_id, conversation_id), FOREIGN KEY(community_id) REFERENCES communities(id) ON DELETE CASCADE, FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE);");
+           await db.execute('CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);');
+         }
+         if (oldV < 15) {
+           // Group ownership tracking.
+           try {
+             await db.execute('ALTER TABLE conversations ADD COLUMN owner_user_id TEXT');
+           } catch (_) {}
+           try {
+             await db.execute('CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_user_id);');
+           } catch (_) {}
+           await db.transaction((txn) async {
+             // Backfill owner from the first admin participant.
+             await txn.execute('''
+               UPDATE conversations SET owner_user_id = (
+                 SELECT p.user_id FROM conversation_participants p
+                 WHERE p.conversation_id = conversations.id AND p.role = 'admin'
+                 ORDER BY p.joined_at ASC LIMIT 1
+               ) WHERE type = 'group' AND owner_user_id IS NULL;
+             ''');
+             await txn.execute('''
+               UPDATE conversation_participants SET role = 'owner'
+               WHERE role = 'admin'
+                 AND id = (
+                   SELECT p2.id FROM conversation_participants p2
+                   WHERE p2.conversation_id = conversation_participants.conversation_id
+                     AND p2.user_id = (SELECT owner_user_id FROM conversations c WHERE c.id = conversation_participants.conversation_id)
+                 )
+                 AND conversation_id IN (SELECT id FROM conversations WHERE type = 'group');
+             ''');
+           });
          }
         }
       },
@@ -193,7 +251,8 @@ class DatabaseService {
         last_message_id TEXT,
         archived INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        owner_user_id TEXT
       );
     ''');
     await db.execute('''
@@ -306,12 +365,17 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_drafts_updated ON drafts(updated_at);');
     await db.execute("CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, category TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);");
     await db.execute("CREATE TABLE IF NOT EXISTS channel_updates (id TEXT PRIMARY KEY, channel_id TEXT NOT NULL, content TEXT, image_path TEXT, created_at TEXT NOT NULL, FOREIGN KEY(channel_id) REFERENCES channels(id) ON DELETE CASCADE);");
-    await db.execute("CREATE TABLE IF NOT EXISTS statuses (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, content TEXT, image_path TEXT, background_color TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
+    await db.execute("CREATE TABLE IF NOT EXISTS statuses (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, content TEXT, image_path TEXT, background_color TEXT, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, privacy TEXT DEFAULT 'all', except_list TEXT, only_list TEXT, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
     await db.execute("CREATE TABLE IF NOT EXISTS blocked_contacts (id TEXT PRIMARY KEY, blocker_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(blocker_id, blocked_id));");
     await db.execute("CREATE TABLE IF NOT EXISTS privacy_settings (key TEXT PRIMARY KEY, value TEXT);");
     await db.execute("CREATE TABLE IF NOT EXISTS channel_followers (channel_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(channel_id, user_id), FOREIGN KEY(channel_id) REFERENCES channels(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
     await db.execute("CREATE TABLE IF NOT EXISTS channel_admins (channel_id TEXT NOT NULL, user_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(channel_id, user_id), FOREIGN KEY(channel_id) REFERENCES channels(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
     await db.execute("CREATE TABLE IF NOT EXISTS status_views (status_id TEXT NOT NULL, viewer_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(status_id, viewer_id), FOREIGN KEY(status_id) REFERENCES statuses(id) ON DELETE CASCADE, FOREIGN KEY(viewer_id) REFERENCES users(id) ON DELETE CASCADE);");
+    await db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_unique ON conversation_participants(conversation_id, user_id);');
+    await db.execute("CREATE TABLE IF NOT EXISTS communities (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, avatar_path TEXT, owner_user_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);");
+    await db.execute("CREATE TABLE IF NOT EXISTS community_members (community_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT DEFAULT 'member', joined_at TEXT NOT NULL, PRIMARY KEY(community_id, user_id), FOREIGN KEY(community_id) REFERENCES communities(id) ON DELETE CASCADE, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);");
+    await db.execute("CREATE TABLE IF NOT EXISTS community_groups (community_id TEXT NOT NULL, conversation_id TEXT NOT NULL, added_at TEXT NOT NULL, PRIMARY KEY(community_id, conversation_id), FOREIGN KEY(community_id) REFERENCES communities(id) ON DELETE CASCADE, FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE);");
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_community_members_user ON community_members(user_id);');
   }
 
   Future<void> close() async {

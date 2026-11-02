@@ -10,6 +10,12 @@ import 'features/auth/forgot_password_screen.dart';
 import 'features/channels/channels_screen.dart';
 import 'features/channels/channel_detail_screen.dart';
 import 'features/status/status_screen.dart';
+import 'features/chat/starred_messages_screen.dart';
+import 'features/chat/archived_chats_screen.dart';
+import 'features/groups/groups_screen.dart';
+import 'features/groups/group_detail_screen.dart';
+import 'features/communities/communities_screen.dart';
+import 'features/communities/community_detail_screen.dart';
 import 'features/home/home_screen.dart';
 import 'features/chat/conversation_screen.dart';
 import 'features/chat/message_search_screen.dart';
@@ -29,6 +35,12 @@ final router = GoRouter(
     GoRoute(path: '/channels', builder: (_, __) => const ChannelsScreen()),
     GoRoute(path: '/channels/detail/:id', builder: (_, s) => ChannelDetailScreen(channelId: s.pathParameters['id']!)),
     GoRoute(path: '/status', builder: (_, __) => const StatusScreen()),
+    GoRoute(path: '/starred', builder: (_, __) => const StarredMessagesScreen()),
+    GoRoute(path: '/archived', builder: (_, __) => const ArchivedChatsScreen()),
+    GoRoute(path: '/groups', builder: (_, __) => const GroupsScreen()),
+    GoRoute(path: '/groups/detail/:id', builder: (_, s) => GroupDetailScreen(groupId: s.pathParameters['id']!)),
+    GoRoute(path: '/communities', builder: (_, __) => const CommunitiesScreen()),
+    GoRoute(path: '/communities/detail/:id', builder: (_, s) => CommunityDetailScreen(communityId: s.pathParameters['id']!)),
     GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
     GoRoute(
       path: '/chat/:id',

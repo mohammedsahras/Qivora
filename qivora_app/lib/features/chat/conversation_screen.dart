@@ -183,27 +183,36 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   Future<void> _loadOlder() async {
     if (_msgs.isEmpty) return;
-    final position = _scroll.position.pixels;
-    final maxBefore = _scroll.position.maxScrollExtent;
+    final position = _scroll.position;
+    final maxBefore =
+        position.hasContentDimensions ? position.maxScrollExtent : 0;
     await _load(loadMore: true);
     if (!mounted) return;
-    final maxAfter = _scroll.position.maxScrollExtent;
-    _scroll.jumpTo(position + (maxAfter - maxBefore));
+    final current = _scroll.position;
+    final maxAfter =
+        current.hasContentDimensions ? current.maxScrollExtent : maxBefore;
+    if (current.hasContentDimensions) {
+      _scroll.jumpTo(position.pixels + (maxAfter - maxBefore));
+    }
   }
 
   Future<void> _retry() => _load();
 
   Future<void> _scrollToBottom({bool animate = false}) async {
     await Future.delayed(const Duration(milliseconds: 50));
-    if (!_scroll.hasClients || !mounted) return;
+    if (!mounted || !_scroll.hasClients) return;
+    final position = _scroll.position;
+    // Content dimensions are only computed during the first layout pass;
+    // scrolling before that would read an uncomputed (null) scroll extent.
+    if (!position.hasContentDimensions) return;
     if (animate) {
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
+      await _scroll.animateTo(
+        position.maxScrollExtent,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
     } else {
-      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      _scroll.jumpTo(position.maxScrollExtent);
     }
   }
 
@@ -218,7 +227,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
-  bool _getBool(dynamic v) => (v as int?) == 1;
+  bool _getBool(dynamic v) {
+    if (v is bool) return v;
+    if (v is num) return v.toInt() == 1;
+    return false;
+  }
 
   /// Sends a text message. Guarded against duplicate taps while a send is
   /// in flight. Persists to SQLite immediately so the message appears at once.
@@ -974,9 +987,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
     final content = m['content'] as String? ?? '';
     showModalBottomSheet(
       context: context,
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+      isScrollControlled: true,
+      builder: (context) => SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
           if (m['message_type'] == 'text')
             ListTile(
               leading: const Icon(Icons.copy),
@@ -1045,6 +1060,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -1225,20 +1241,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
                       ],
                     ),
                   )
-                : _msgs.isEmpty
-                    ? const Center(
-                        child: Text('No messages yet'),
-                      )
-                    : Column(
-                        children: [
-                          Expanded(
-                            child: ListView.builder(
-                              controller: _scroll,
-                              padding: const EdgeInsets.all(12),
-                              itemCount: _msgs.length,
-                              itemBuilder: (_, i) => _buildMessage(_msgs[i]),
-                            ),
-                          ),
+                : Column(
+                    children: [
+                      Expanded(
+                        child: _msgs.isEmpty
+                            ? const Center(
+                                child: Text('No messages yet'),
+                              )
+                            : ListView.builder(
+                                controller: _scroll,
+                                padding: const EdgeInsets.all(12),
+                                itemCount: _msgs.length,
+                                itemBuilder: (_, i) => _buildMessage(_msgs[i]),
+                              ),
+                      ),
                           if (_isRecording)
                             Container(
                               color: AppColors.error.withValues(alpha: 0.1),

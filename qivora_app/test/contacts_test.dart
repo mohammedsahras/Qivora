@@ -2,16 +2,30 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:qivora_app/core/database/database_service.dart';
 import 'package:qivora_app/features/contacts/contacts_screen.dart';
 
 void main() {
-  databaseFactory = databaseFactoryFfi;
+  TestWidgetsFlutterBinding.ensureInitialized();
+  databaseFactory = databaseFactoryFfiNoIsolate;
   late String dbPath;
 
+  GoRouter buildRouter() => GoRouter(
+        routes: [
+          GoRoute(path: '/', builder: (_, __) => const ContactsScreen()),
+          GoRoute(
+            path: '/chat/:id',
+            builder: (_, __) => const Scaffold(body: SizedBox()),
+          ),
+        ],
+      );
+
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     final dir = Directory.systemTemp;
     dbPath = p.join(dir.path,
         'qivora_contacts_test_${DateTime.now().millisecondsSinceEpoch}.db');
@@ -50,8 +64,10 @@ void main() {
 
   testWidgets('loads contacts, filters by search, and clears search',
       (WidgetTester tester) async {
-    await seed();
-    await tester.pumpWidget(const MaterialApp(home: ContactsScreen()));
+    await tester.runAsync(() async {
+      await seed();
+    });
+    await tester.pumpWidget(MaterialApp.router(routerConfig: buildRouter()));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
@@ -75,8 +91,10 @@ void main() {
 
   testWidgets('opens or creates a conversation when a contact is tapped',
       (WidgetTester tester) async {
-    await seed();
-    await tester.pumpWidget(const MaterialApp(home: ContactsScreen()));
+    await tester.runAsync(() async {
+      await seed();
+    });
+    await tester.pumpWidget(MaterialApp.router(routerConfig: buildRouter()));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
@@ -84,31 +102,36 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    // We navigated to /chat/..., verify the conversation was created in the DB.
-    final db = await DatabaseService.instance.database;
+    final db = (await tester.runAsync<Database>(() => openDb()))!;
     final convs = await db.query('conversations',
         where: 'title = ? AND type = ?', whereArgs: ['Alice Smith', 'direct']);
     expect(convs.length, 1);
     final cid = convs.first['id'] as String;
 
-    // Participant rows exist for both users.
     final parts = await db.query('conversation_participants',
         where: 'conversation_id = ?', whereArgs: [cid]);
     expect(parts.any((r) => r['user_id'] == 'me'), isTrue);
     expect(parts.any((r) => r['user_id'] == 'u1'), isTrue);
   });
 
-  testWidgets('shows empty state without contacts',
-      (WidgetTester tester) async {
-    await seed();
+  testWidgets('shows empty state without contacts', (WidgetTester tester) async {
+    await tester.runAsync(() async {
+      await seed();
+    });
 
-    final db = await DatabaseService.instance.database;
-    await db.delete('users');
+    final db = (await tester.runAsync<Database>(() => openDb()))!;
+    await tester.runAsync(() async {
+      await db.delete('users');
+    });
 
-    await tester.pumpWidget(const MaterialApp(home: ContactsScreen()));
+    await tester.pumpWidget(MaterialApp.router(routerConfig: buildRouter()));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('No contacts yet'), findsOneWidget);
   });
 }
+
+Future<Database> openDb() => DatabaseService.instance.database;

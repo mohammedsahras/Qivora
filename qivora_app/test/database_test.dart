@@ -113,7 +113,7 @@ void main() {
 
     final version = (await db.rawQuery('PRAGMA user_version'))
         .first['user_version'] as int?;
-    expect(version, 13);
+    expect(version, 17);
 
     final tables =
         (await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'"))
@@ -181,7 +181,7 @@ void main() {
     final db = await DatabaseService.instance.database;
     final version = (await db.rawQuery('PRAGMA user_version'))
         .first['user_version'] as int?;
-    expect(version, 13);
+    expect(version, 17);
 
     final convCols = (await db.rawQuery('PRAGMA table_info(conversations)'))
         .map((row) => row['name'] as String)

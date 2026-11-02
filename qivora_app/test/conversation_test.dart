@@ -8,7 +8,7 @@ import 'package:qivora_app/core/database/database_service.dart';
 import 'package:qivora_app/features/chat/conversation_screen.dart';
 
 void main() {
-  databaseFactory = databaseFactoryFfi;
+  databaseFactory = databaseFactoryFfiNoIsolate;
   late String dbPath;
 
   setUp(() async {
@@ -61,7 +61,9 @@ void main() {
 
   testWidgets('sends a message, persists it, and displays it immediately',
       (WidgetTester tester) async {
-    await seedConversation();
+    await tester.runAsync(() async {
+      await seedConversation();
+    });
     await tester.pumpWidget(
       const MaterialApp(
         home: ConversationScreen(
@@ -72,15 +74,20 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
 
     await tester.enterText(find.byType(TextField).first, 'Hello world');
     await tester.tap(find.byTooltip('Send'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Hello world'), findsOneWidget);
-    expect(await messageCount(), 1);
-    final db = await DatabaseService.instance.database;
+    final count = await tester.runAsync(() => messageCount());
+    expect(count, 1);
+    final db = (await tester.runAsync<Database>(() => openDb()))!;
     final rows = await db.query(
       'messages',
       where: 'conversation_id = ? AND content = ?',
@@ -92,7 +99,9 @@ void main() {
   });
 
   testWidgets('rejects empty messages', (WidgetTester tester) async {
-    await seedConversation();
+    await tester.runAsync(() async {
+      await seedConversation();
+    });
     await tester.pumpWidget(
       const MaterialApp(
         home: ConversationScreen(
@@ -101,19 +110,26 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
     await tester.tap(find.byTooltip('Send'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
 
-    expect(await messageCount(), 0);
+    final count = await tester.runAsync(() => messageCount());
+    expect(count, 0);
   });
 
   testWidgets('prevents duplicate sends from rapid repeated taps',
       (WidgetTester tester) async {
-    await seedConversation();
+    await tester.runAsync(() async {
+      await seedConversation();
+    });
     await tester.pumpWidget(
       const MaterialApp(
         home: ConversationScreen(
@@ -122,6 +138,8 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
@@ -130,36 +148,44 @@ void main() {
     await tester.tap(find.byTooltip('Send'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Duplicate?'), findsNWidgets(1));
-    expect(await messageCount(), 1);
+    final count = await tester.runAsync(() => messageCount());
+    expect(count, 1);
   });
 
   testWidgets(
       'loads message history and reads delivery status from the database',
       (WidgetTester tester) async {
-    await seedConversation();
-    final db = await DatabaseService.instance.database;
-    final now = DateTime.now();
-    await db.insert('messages', {
-      'id': 'msg1',
-      'conversation_id': 'conv1',
-      'sender_id': 'me',
-      'message_type': 'text',
-      'content': 'First message',
-      'delivery_status': 'read',
-      'created_at': now.subtract(const Duration(minutes: 5)).toIso8601String(),
-      'updated_at': now.subtract(const Duration(minutes: 5)).toIso8601String(),
+    await tester.runAsync(() async {
+      await seedConversation();
     });
-    await db.insert('messages', {
-      'id': 'msg2',
-      'conversation_id': 'conv1',
-      'sender_id': 'me',
-      'message_type': 'text',
-      'content': 'Second message',
-      'delivery_status': 'sent',
-      'created_at': now.toIso8601String(),
-      'updated_at': now.toIso8601String(),
+    final db = (await tester.runAsync<Database>(() => openDb()))!;
+    final now = DateTime.now().toIso8601String();
+    final fiveMinAgo = DateTime.now().subtract(const Duration(minutes: 5)).toIso8601String();
+    await tester.runAsync(() async {
+      await db.insert('messages', {
+        'id': 'msg1',
+        'conversation_id': 'conv1',
+        'sender_id': 'me',
+        'message_type': 'text',
+        'content': 'First message',
+        'delivery_status': 'read',
+        'created_at': fiveMinAgo,
+        'updated_at': fiveMinAgo,
+      });
+      await db.insert('messages', {
+        'id': 'msg2',
+        'conversation_id': 'conv1',
+        'sender_id': 'me',
+        'message_type': 'text',
+        'content': 'Second message',
+        'delivery_status': 'sent',
+        'created_at': now,
+        'updated_at': now,
+      });
     });
 
     await tester.pumpWidget(
@@ -170,6 +196,8 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
@@ -181,18 +209,22 @@ void main() {
 
   testWidgets('deletes a message with confirmation and soft-deletes it',
       (WidgetTester tester) async {
-    await seedConversation();
-    final db = await DatabaseService.instance.database;
+    await tester.runAsync(() async {
+      await seedConversation();
+    });
+    final db = (await tester.runAsync<Database>(() => openDb()))!;
     final now = DateTime.now().toIso8601String();
-    await db.insert('messages', {
-      'id': 'msg1',
-      'conversation_id': 'conv1',
-      'sender_id': 'me',
-      'message_type': 'text',
-      'content': 'To be deleted',
-      'delivery_status': 'sent',
-      'created_at': now,
-      'updated_at': now,
+    await tester.runAsync(() async {
+      await db.insert('messages', {
+        'id': 'msg1',
+        'conversation_id': 'conv1',
+        'sender_id': 'me',
+        'message_type': 'text',
+        'content': 'To be deleted',
+        'delivery_status': 'sent',
+        'created_at': now,
+        'updated_at': now,
+      });
     });
 
     await tester.pumpWidget(
@@ -203,6 +235,8 @@ void main() {
         ),
       ),
     );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
@@ -217,9 +251,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('To be deleted'), findsNothing);
-    final rows =
-        await db.query('messages', where: 'id = ?', whereArgs: ['msg1']);
+    final rows = await db.query('messages', where: 'id = ?', whereArgs: ['msg1']);
     expect(rows.length, 1);
     expect(rows.first['deleted_at'], isNotNull);
   });
 }
+
+Future<Database> openDb() => DatabaseService.instance.database;
